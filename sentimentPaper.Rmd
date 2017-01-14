@@ -1,0 +1,100 @@
+---
+title: "Sentiment Indicator and Sector Performance"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+```
+
+This report documents analytical steps used in the Paper presented in Zlin, 2017. 
+
+Document is structured as follows:
+
+- market data analysis
+- 
+
+Data from Blooomberg database was downloaded separately and are stored in *.txt* files. Import and cleaning is not described here, but can be found in sourced file *sentimentDataClean.R*.
+```{r import1, warning=FALSE, message=FALSE}
+source("sentimentDataClean.R") # import and cleaning, Bloomberg Data
+data <- sentimentDataClean()
+str(data)
+```
+Monthly data cover period from  `r min(data[["sentData"]]$Date)` to `r max(data[["sentData"]]$Date)`
+
+By following code data from [yahoo](https://finance.yahoo.com/) are fetched. Only starting period is set. **TODO**: for final version *to* should be set.
+```{r, importFinData, cache=TRUE, warning=FALSE, message=FALSE}
+library(tidyquant)
+
+vwData  <- tq_get("VOW.DE", get = "stock.prices", from = " 2005-01-01")
+bmwData  <- tq_get("BMW.DE", get = "stock.prices", from = " 2005-01-01")
+daiData  <- tq_get("DAI.DE", get = "stock.prices", from = " 2005-01-01")
+```
+
+We are interested in Adjusted-Close prices as they reflect dividend payments and share splits.
+
+```{r, finDatamunging, warning=FALSE, message=FALSE}
+vwClose <- vwData %>% select(date, vw=adjusted) %>% mutate(date = ymd(date) )
+bmwClose <- bmwData %>% select(date, bmw=adjusted) %>% mutate(date = ymd(date) )
+daiClose <- daiData %>% select(date, dai=adjusted) %>% mutate(date = ymd(date) )
+manufData <- vwClose %>% 
+ left_join(bmwClose, by="date") %>%
+ left_join(daiClose, by="date")
+```
+
+```{r}
+manufLong <- manufData %>% gather(., manuf, adjClose, -date)
+
+manufLong %>%
+ group_by(manuf, year=year(date), month=month(date)) %>%
+ summarise(
+  nobs = n(),
+  minPrice = min(adjClose),
+  maxPrice = max(adjClose),
+  diff = maxPrice-minPrice,
+  volat = sd(adjClose) 
+)
+```
+
+
+## Time Series Visualisation
+First time-series is in levels. We need to reshape the data to meet ggplot standards.
+
+```{r, fig.width=10, fig.heigh=4}
+manufLong <- manufData %>% gather(., manuf, adjClose, -date)
+
+ggplot(manufLong, aes(x=date, y=adjClose, col=manuf) ) + 
+ geom_line() + 
+ facet_grid(.~manuf) + theme_bw()
+```
+
+Time series adjusted to initial date:
+
+```{r, fig.width=10, fig.heigh=5}
+manufDataScale <- manufData %>% 
+ mutate(
+  vw = vw/first(vw),
+  bmw = bmw/first(bmw),
+  dai = dai/first(dai)
+ )
+
+manufDataScaleLong <- manufDataScale %>% gather(., manuf, adjClose, -date)
+
+manufDataScaleLong$manuf <- factor(
+ manufDataScaleLong$manuf, levels=c("vw", "bmw", "dai"))
+
+ggxbreaks <- as.Date(paste0(2015:2017, "/1/1"), format="%Y/%m/%d" )
+
+ggplot(manufDataScaleLong, aes(x=date, y=adjClose, col=manuf) ) + 
+ geom_line() +  theme_bw() + 
+ scale_colour_discrete("Manufacturer", labels=c( "VW", "BMW", "Daimler")) + 
+ scale_y_continuous("Adjusted price, normed") + 
+ scale_x_date("Date", date_labels = "%Y", date_minor_breaks = "1 year")
+
+```
+
+
+
+
+
+
