@@ -1,6 +1,6 @@
 library(tidyquant)
 
-vwData  <- tq_get("VOW.DE", get = "stock.prices", from = " 2005-01-01")
+vwData  <- tq_get("VOW.DE", get = "stock.prices", from = " 2005-01-01") #vOW3 preffer. shares
 bmwData  <- tq_get("BMW.DE", get = "stock.prices", from = " 2005-01-01")
 daiData  <- tq_get("DAI.DE", get = "stock.prices", from = " 2005-01-01")
 
@@ -8,9 +8,32 @@ vwClose <- vwData %>% select(date, vw=adjusted) %>% mutate(date = ymd(date) )
 bmwClose <- bmwData %>% select(date, bmw=adjusted) %>% mutate(date = ymd(date) )
 daiClose <- daiData %>% select(date, dai=adjusted) %>% mutate(date = ymd(date) )
 
+#---------------------
+table(is.na(vwClose$vw))
+table(is.na(bmwClose$bmw))
+table(is.na(daiClose$dai))
+
+vwClose[which(!complete.cases(vwClose)), ]
+vwClose[which(!complete.cases(bmwClose )), ]
+vwClose[which(!complete.cases(daiClose)), ]
+
+bmwData %>% filter(date==ymd("2008-08-01"))
+daiData %>% filter(date=="2010-08-15")
+#---------------------
+
 manufData <- vwClose %>% 
- left_join(bmwClose, by="date") %>%
- left_join(daiClose, by="date") 
+  full_join(bmwClose, by="date") %>%
+  full_join(daiClose, by="date") 
+
+manufData[which(!complete.cases(manufData) ), ]
+
+length(c(unique(vwClose$date, bmwClose$date, daiClose$date)))
+3127-3112
+
+
+#---- Missing prices
+
+
 
 manufLong <- manufData %>% gather(., manuf, adjClose, -date)
 
@@ -24,7 +47,6 @@ manufLong %>%
   volat = sd(adjClose) 
 )
 
-weights <- c(0.35, 0.35, 0.3)
 
 #----------
 ggplot(manufLong, aes(x=date, y=adjClose, col=manuf) ) + 
@@ -58,3 +80,43 @@ ggplot(manufDataScaleLong, aes(x=date, y=adjClose, col=manuf) ) +
  scale_y_continuous("Adjusted price, normed") + 
  scale_x_date("Date", date_labels = "%Y", date_minor_breaks = "1 year")
 
+#----------------
+# Returns analysis
+# Aritmetic (simple) or Logaritmic returns?
+retArit <- function(x) {x/lag(x)}
+retLog <- function(x) {log(x)-log(lag(x))}
+
+manufData %>% 
+ mutate_each(
+  funs(retLog), c(vw, bmw,dai)) -> retData
+
+weights <- c(0.35, 0.35, 0.3) #BMW, DAI, VW
+
+retData[-1, ] %>% # remove NA returns
+  gather(., manuf, adjClose, -date) %>%
+  group_by(manuf, year=year(date), month=month(date)) %>%
+  summarise(
+    expect = mean(adjClose),
+    varian = var(adjClose)
+  ) %>%
+  group_by(year, month) %>%
+   summarise(
+     avg = weighted.mean(x=expect,w=weights)
+   )
+  
+
+aaa %>% filter(year==2015 & month==10)
+
+#---------------
+library(PerformanceAnalytics)
+CalculateReturns(prices, method = c("discrete", "log"))
+
+retData[-1, ] %>% data.frame -> dsdata
+xtsdata <- xts(dsdata[,-1], order.by = dsdata[, 1])
+  %>%
+Return.portfolio(xtsdata[complete.cases(xtsdata),], weights)
+
+xtsdata[which(!complete.cases(xtsdata) )]
+
+
+weights <- c(0.35, 0.35, 0.3)
