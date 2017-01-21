@@ -3,18 +3,31 @@ title: "Sentiment Indicator and Sector Performance"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-
-```
-
 This report documents analytical steps used in the Paper presented in Zlin, 2017. 
+
+The premis of the paper is:
+
+ > Sentiment indicators have predictive power on fluctuations in prices of major economic subject in the economy.
+
+ > Volatility of prices responds differently when change occurs in low levels.
+
+- As a sentiment indicators ZEW and IFO indexes were used. 
+- On a company level three companies were selected. Composit index of selected on a macro level. **TODO** sectors level indicator, too? 
 
 Document is structured as follows:
 
-- market data analysis
-- 
+- Data import and assumptions
+- Market data analysis, returns
+- Sentiment analysis
+- Forecasting model description and performance.
 
-Data from Blooomberg database was downloaded separately and are stored in *.txt* files. Import and cleaning is not described here, but can be found in sourced file *sentimentDataClean.R*.
+# Data Import and Assumptions
+
+Two input data files were used. Both were obtained through the Bloomberg database. Although there are tools for receiving market data by R packages, Bloomberg was used (see *paperFinData.R* for analysis and description of problems, such as missing values). Data containing sentiment indexes and market perfomence indicators (prices) are stored separately in *.txt* files. Import and cleaning is not described here, but can be found in sourced file *sentimentDataClean.R*.
+
+## Sentiment Data Indexes
+**Sentiment Indexes ** 
+
 ```{r import1, warning=FALSE, message=FALSE}
 source("sentimentDataClean.R") # import and cleaning, Bloomberg Data
 data <- sentimentDataClean()
@@ -22,76 +35,154 @@ str(data)
 ```
 Monthly data cover period from  `r min(data[["sentData"]]$Date)` to `r max(data[["sentData"]]$Date)`
 
-By following code data from [yahoo](https://finance.yahoo.com/) are fetched. Only starting period is set. **TODO**: for final version *to* should be set.
-```{r, importFinData, cache=TRUE, warning=FALSE, message=FALSE}
-library(tidyquant)
+## Performance of Economic Indicators
+As the project is oriented on Automotive industry, Volkswagen, BMW and Daimler companies were selected. Analysis is accompanied by tracking composite DAX index. 
 
-vwData  <- tq_get("VOW.DE", get = "stock.prices", from = " 2005-01-01")
-bmwData  <- tq_get("BMW.DE", get = "stock.prices", from = " 2005-01-01")
-daiData  <- tq_get("DAI.DE", get = "stock.prices", from = " 2005-01-01")
+```{r importPerf, warning=FALSE, message=FALSE}
+
+file <- "D:/UTB/MyPaper/SentimentPerformancePaper/Data/perfmormanceManufEconomy.txt"
+perfDataIn <- read_tsv(file) %>%
+  mutate(Date = dmy(Date))
+
+perfData <- perfDataIn[complete.cases(perfDataIn), ] #removes Christmas value
 ```
-
-We are interested in Adjusted-Close prices as they reflect dividend payments and share splits.
-
-```{r, finDatamunging, warning=FALSE, message=FALSE}
-vwClose <- vwData %>% select(date, vw=adjusted) %>% mutate(date = ymd(date) )
-bmwClose <- bmwData %>% select(date, bmw=adjusted) %>% mutate(date = ymd(date) )
-daiClose <- daiData %>% select(date, dai=adjusted) %>% mutate(date = ymd(date) )
-manufData <- vwClose %>% 
- left_join(bmwClose, by="date") %>%
- left_join(daiClose, by="date")
-```
+From the following Figure can be observed problematic development of Volkswagen (VW) prices. These are two-fold:
+ 1. Speculative pricing during the perdion 8/2008 when VW acquired Porsche. 
+ 2. Sharp decline in 2015 after Diesel Gate. Both of these events are rather company-related and cannot be atributed to general economic environment sentiment. This concerns supply/demand attributes of the market rather than speculative nature of the market. TODO: Justify portfolio composition, remove VW from the company-level analysis and continue only with BMW and Daimler (DAI)?
+ 
+To solve the first problem, unfaithful value traded during `r perfData[ which.max(perfData$VOW), "Date"]`, averege value of day before and after replaced this value. 
 
 ```{r}
-manufLong <- manufData %>% gather(., manuf, adjClose, -date)
+perfData[which.max(perfData$VOW),"VOW"] <- 
+  mean(perfData[(-1:1)+which.max(perfData$VOW),"VOW"]$VOW[-2])
+```
+# Market Data Analysis, Returns
+In the first step, table (only first values showed here) summarising monthly min, max and differences in stock prices were computed. As the assessment of volatility, standard deviation was computed. This is not correct for the future analysis because of a non-stationarity of time series.
+
+
+```{r}
+manufLong <- perfData %>% gather(., manuf, adjClose, -Date)
 
 manufLong %>%
- group_by(manuf, year=year(date), month=month(date)) %>%
- summarise(
-  nobs = n(),
-  minPrice = min(adjClose),
-  maxPrice = max(adjClose),
-  diff = maxPrice-minPrice,
-  volat = sd(adjClose) 
-)
+  group_by(manuf, year=year(Date), month=month(Date)) %>%
+  summarise(
+    nobs = n(),
+    minPrice = min(adjClose),
+    maxPrice = max(adjClose),
+    diff = maxPrice-minPrice,
+    volat = sd(adjClose) 
+  )
+
 ```
 
-
-## Time Series Visualisation
-First time-series is in levels. We need to reshape the data to meet ggplot standards.
-
-```{r, fig.width=10, fig.heigh=4}
-manufLong <- manufData %>% gather(., manuf, adjClose, -date)
-
-ggplot(manufLong, aes(x=date, y=adjClose, col=manuf) ) + 
- geom_line() + 
- facet_grid(.~manuf) + theme_bw()
+Visualisation TODO TODO TODO:
+```{r}
+manufLong %>% filter(manuf!="CDAX") %>%
+ggplot(., aes(x=Date, y=adjClose, col=manuf) ) + 
+  geom_line() + 
+  facet_grid(.~manuf) + theme_bw()
 ```
 
-Time series adjusted to initial date:
+Because of different values (levels) comparison might be misleading. So the scaling that for all times series value of share was set to 1 at 1/1/2015 = 1,
 
-```{r, fig.width=10, fig.heigh=5}
-manufDataScale <- manufData %>% 
- mutate(
-  vw = vw/first(vw),
-  bmw = bmw/first(bmw),
-  dai = dai/first(dai)
- )
+```{r}
+perfDataScale <- perfData %>% 
+  arrange(Date) %>%
+  mutate(
+    VW = VOW/first(VOW),
+    BMW = BMW/first(BMW),
+    DAI = DAI/first(DAI),
+    DAX = CDAX/first(CDAX)
+  ) %>% 
+  select(Date, VW, BMW, DAI, DAX)
 
-manufDataScaleLong <- manufDataScale %>% gather(., manuf, adjClose, -date)
+perfDataScale
+```
 
-manufDataScaleLong$manuf <- factor(
- manufDataScaleLong$manuf, levels=c("vw", "bmw", "dai"))
+Visualisation TOTOTOTOTOTO
 
+```{r}
+# ggdata prep
+perfDataScaleLong <- perfDataScale %>% gather(., Title, adjClose, -Date)
+# settings for plot
 ggxbreaks <- as.Date(paste0(2015:2017, "/1/1"), format="%Y/%m/%d" )
+# relevel to match top-down Time-Series
+perfDataScaleLong$Title <- factor(
+  perfDataScaleLong$Title, levels=c("VW", "DAX", "BMW", "DAI"))
 
-ggplot(manufDataScaleLong, aes(x=date, y=adjClose, col=manuf) ) + 
- geom_line() +  theme_bw() + 
- scale_colour_discrete("Manufacturer", labels=c( "VW", "BMW", "Daimler")) + 
- scale_y_continuous("Adjusted price, normed") + 
- scale_x_date("Date", date_labels = "%Y", date_minor_breaks = "1 year")
+ggplot(perfDataScaleLong, aes(x=Date, y=adjClose, col=Title) ) + 
+  geom_line() + theme_bw()+ 
+  scale_colour_discrete("Title", labels=c("VW", "DAX", "BMW", "Daimler")) + 
+  scale_y_continuous("Adjusted price, normed") + 
+  scale_x_date("Date", date_labels = "%Y", date_minor_breaks = "1 year")
 
 ```
+
+Todo: Legend inside plot values, print final values, limit to 31/12/2016
+
+## Returns analysis
+TODO: Decide whether aritmetic (simple) or Logaritmic returns should be used. Here are own-defined functions which compute returns.
+```{r}
+retArit <- function(x) {x/lag(x)}
+retLog <- function(x) {log(x)-log(lag(x))}
+```
+
+### Daily Returns Analysis
+```{r, fig.width=10, fig.height=5}
+perfData %>% 
+  mutate_each(
+    funs(retLog), c(VW=VOW, DAX=CDAX, BMW, DAI)) %>%
+  select(-VOW, -CDAX) -> retDataDaily
+
+retDataDaily %>% gather(Title, Returns, -Date) %>%
+ggplot(., aes(x=Date, y=Returns, colour=Title) ) + 
+  geom_line() + theme_bw() + facet_grid(~Title)
+```
+
+### Weekly Returns Analysis
+```{r, fig.width=10, fig.height=5}
+perfData %>% 
+  arrange(Date) %>%
+  mutate(week = week(Date) ) %>%
+  group_by(paste0(year(Date),month(Date),week(Date))) %>%
+  do(tail(., n=1)) %>%
+  arrange(Date) %>% ungroup() %>%
+  mutate_each(
+    funs(retLog), c(VOW, CDAX, BMW, DAI)) %>%
+  select(Date, VOW, CDAX, BMW, DAI) -> retDataWeekly
+
+colnames(retDataWeekly) <- c("Date","VW","DAX","BMW","DAI")
+
+retDataWeekly[-1, ] %>% gather(Title, Returns, -Date) %>%
+  ggplot(., aes(x=Date, y=Returns, colour=Title) ) + 
+  geom_line() + theme_bw() + facet_grid(~Title)
+```
+
+### Monthly Returns Analysis
+```{r, fig.width=10, fig.height=5}
+perfData %>% 
+  arrange(Date) %>%
+  mutate(month = month(Date) ) %>%
+  group_by(paste0(year(Date),month(Date)) ) %>%
+  do(tail(., n=1)) %>%
+  arrange(Date) %>% ungroup() %>%
+  mutate_each(
+    funs(retLog), c(VOW, CDAX, BMW, DAI)) %>%
+  select(Date, VOW, CDAX, BMW, DAI) -> retDataMonthly
+
+colnames(retDataMonthly) <- c("Date","VW","DAX","BMW","DAI")
+
+retDataMonthly[-1, ] %>% gather(Title, Returns, -Date) %>%
+  ggplot(., aes(x=Date, y=Returns, colour=Title) ) + 
+  geom_line() + theme_bw() + facet_grid(~Title)
+```
+
+
+
+
+
+
+
 
 
 

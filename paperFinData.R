@@ -120,3 +120,27 @@ xtsdata[which(!complete.cases(xtsdata) )]
 
 
 weights <- c(0.35, 0.35, 0.3)
+
+
+
+#----------------------------------------------
+By following code data from [yahoo](https://finance.yahoo.com/) are fetched. Only starting period is set. **TODO**: for final version *to* should be set.
+```{r, importFinData, cache=TRUE, warning=FALSE, message=FALSE}
+library(tidyquant)
+
+vwData  <- tq_get("VOW.DE", get = "stock.prices", from = " 2005-01-01")
+bmwData  <- tq_get("BMW.DE", get = "stock.prices", from = " 2005-01-01")
+daiData  <- tq_get("DAI.DE", get = "stock.prices", from = " 2005-01-01")
+```
+
+We are interested in Adjusted-Close prices as they reflect dividend payments and share splits.
+
+```{r, finDatamunging, warning=FALSE, message=FALSE}
+vwClose <- vwData %>% select(date, vw=adjusted) %>% mutate(date = ymd(date) )
+bmwClose <- bmwData %>% select(date, bmw=adjusted) %>% mutate(date = ymd(date) )
+daiClose <- daiData %>% select(date, dai=adjusted) %>% mutate(date = ymd(date) )
+manufData <- vwClose %>% 
+  left_join(bmwClose, by="date") %>%
+  left_join(daiClose, by="date")
+```
+
