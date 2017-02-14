@@ -2,19 +2,17 @@ library(tidyverse)
 library(lubridate)
 
 #------ Import/munging ---------
-file <- "SentimentPerformancePaper/Data/perfmormanceManufEconomy.txt"
+file <- "Data/perfmormanceManufEconomy.txt"
 perfDataIn <- read_tsv(file) %>%
   mutate(Date = dmy(Date))
 
 perfData <- perfDataIn[complete.cases(perfDataIn), ]
-perfData[c(-5:3) + which.max(perfData$VOW), ]
 
 # Spike replaced by average of t+-1 values
 perfData[which.max(perfData$VOW),"VOW"] <- 
   mean(perfData[(-1:1)+which.max(perfData$VOW),"VOW"]$VOW[-2])
 
-  
-#------ Analysis ---------
+#=========== Analysis ===========
 manufLong <- perfData %>% gather(., manuf, adjClose, -Date)
 
 manufLong %>%
@@ -27,7 +25,7 @@ manufLong %>%
     volat = sd(adjClose) 
   )
 
-#---
+# --- Wide to Long ---
 
 manufLong %>% filter(manuf!="CDAX") %>%
 ggplot(., aes(x=Date, y=adjClose, col=manuf) ) + 
@@ -61,25 +59,24 @@ ggplot(perfDataScaleLong, aes(x=Date, y=adjClose, col=Title) ) +
 # Todo: Legend inside plot values, print final values, limit to 31/12/2016
 
 
-#----------------
+#--------------------------------------------------
 # Aritmetic (simple) or Logaritmic returns?
-retArit <- function(x) {x/lag(x)}
+retArit <- function(x) {x/lag(x)-1}
 retLog <- function(x) {log(x)-log(lag(x))}
 
-# Returns analysis - Daily
+#------- Returns analysis - Daily
 perfData %>% 
+ arrange(Date) %>%
   mutate_each(
     funs(retLog), c(VW=VOW, DAX=CDAX, BMW, DAI)) %>%
-  select(-VOW, -CDAX) -> retData
+  select(-VOW, -CDAX) -> retDataDaily
 
-weights <- c(0.35, 0.35, 0.3) #BMW, DAI, VW
-
-retData %>% gather(Title, Returns, -Date) %>%
+retDataDaily %>% gather(Title, Returns, -Date) %>%
 ggplot(., aes(x=Date, y=Returns, colour=Title) ) + 
   geom_line() + theme_bw() + facet_grid(~Title)
 
 
-### Weekly Returns Analysis
+#------- Returns analysis - Weekly 
 perfData %>% 
   arrange(Date) %>%
   mutate(week = week(Date) ) %>%
